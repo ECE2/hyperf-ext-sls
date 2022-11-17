@@ -15,7 +15,8 @@ return [
                     'logStoreName' => env('SLS_LOG_STORE_NAME'), // logStoreName 日志库名
                     'topic' => env('SLS_TOPIC') ?: 'api_log', // topic 日志主题
                     'source' => env('SLS_SOURCE') ?: env('APP_NAME'), // 源, 默认系统名就行
-                ]
+                    'maxGuzzleConnections' => env('SLS_MAX_GUZZLE_CONNECTIONS') ?: 50, // guzzle client pool max connections
+                ],
             ],
         ],
     ],

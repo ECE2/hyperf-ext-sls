@@ -2,14 +2,22 @@
 
 namespace Ece2\HyperfExtSls;
 
-use AlibabaCloud\OpenApiUtil\OpenApiUtilClient;
 use AlibabaCloud\SDK\Sls\V20201230\Sls;
+use AlibabaCloud\Tea\Response;
+use AlibabaCloud\Tea\Tea;
 use AlibabaCloud\Tea\Utils\Utils\RuntimeOptions;
 use Darabonba\OpenApi\Models\Config;
 use Darabonba\OpenApi\Models\OpenApiRequest;
 use Darabonba\OpenApi\Models\Params;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
+use Hyperf\Guzzle\PoolHandler;
+use Hyperf\Utils\Coroutine;
+use Monolog\Formatter\LineFormatter;
 use Monolog\Handler\AbstractProcessingHandler;
+use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
+use Psr\Http\Message\ResponseInterface;
 
 class SlsHandler extends AbstractProcessingHandler
 {
@@ -23,6 +31,8 @@ class SlsHandler extends AbstractProcessingHandler
     public function __construct($config)
     {
         $this->config = $config;
+
+        $this->replaceSlsClient();
 
         $this->client = new Sls(new Config([
             'accessKeyId' => $config['accessKeyId'],
@@ -87,8 +97,46 @@ class SlsHandler extends AbstractProcessingHandler
 
                 $this->client->execute($params, $req, $runtime);
             } catch (\Throwable $e) {
-
+                $this->getDowngradeLogger()->error(sprintf(
+                    'sls 推送失败: %s (file: %s line: %d code: %d)',
+                    $e->getMessage(),
+                    $e->getFile(),
+                    $e->getLine(),
+                    $e->getCode()
+                ));
             }
         });
+    }
+
+    public function replaceSlsClient()
+    {
+        $handler = null;
+        if (Coroutine::inCoroutine()) {
+            $handler = make(PoolHandler::class, [
+                'option' => [
+                    'max_connections' => ((int) $this->config['maxGuzzleConnections']) ?: 50,
+                ],
+            ]);
+        }
+
+        $stack = HandlerStack::create($handler);
+        $stack->push(Middleware::mapResponse(static fn(ResponseInterface $response) => new Response($response)));
+
+        Tea::config(['handler' => $stack]);
+    }
+
+    /**
+     * 降级日志
+     * @return \Hyperf\Logger\Logger|mixed
+     */
+    protected function getDowngradeLogger(): Logger
+    {
+        $handler = make(StreamHandler::class, ['stream' => BASE_PATH . '/runtime/logs/hyperf.log']);
+        $handler->setFormatter(make(LineFormatter::class, [
+            'dateFormat' => 'Y-m-d H:i:s',
+            'allowInlineLineBreaks' => true
+        ]));
+
+        return make(\Hyperf\Logger\Logger::class, ['name' => 'sls_logger', 'handlers' => [$handler]]);
     }
 }
